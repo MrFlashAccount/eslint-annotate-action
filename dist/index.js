@@ -56318,6 +56318,8 @@ function getAnalyzedReport(files) {
     let warningText = '';
     // Create an array for annotations
     const annotations = [];
+    // Track unique error/warning messages to prevent duplicates in markdown report
+    const seenMessages = new Set();
     // Loop through each file
     for (const file of files) {
         // Get the file path and any warning/error messages
@@ -56380,6 +56382,14 @@ function getAnalyzedReport(files) {
              * text for the error/warning
              */
             const link = `https://github.com/${OWNER}/${REPO}/blob/${SHA}/${filePathTrimmed}#L${line}:L${endLine}`;
+            // Create a unique identifier for this error/warning message
+            const messageId = `${filePathTrimmed}:${line}:${endLine}:${ruleId}:${message}`;
+            // Skip if we've already seen this exact message
+            if (seenMessages.has(messageId)) {
+                continue;
+            }
+            // Mark this message as seen
+            seenMessages.add(messageId);
             let messageText = `### [\`${filePathTrimmed}\` line \`${line.toString()}\`](${link})\n`;
             messageText += '- Start Line: `' + line.toString() + '`\n';
             messageText += '- End Line: `' + endLine.toString() + '`\n';
@@ -56566,6 +56576,7 @@ async function run() {
     core.setOutput('summary', analyzedReport.summary);
     core.setOutput('errorCount', analyzedReport.errorCount);
     core.setOutput('warningCount', analyzedReport.warningCount);
+    core.setOutput('markdown', analyzedReport.markdown);
     try {
         // Create a new, in-progress status check
         const checkId = await (0, openStatusCheck_1.default)();

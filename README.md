@@ -41,6 +41,7 @@ This allows for more flexibility on how ESLint is run. This action is agnostic e
 | `summary` | A short description of the error and warning count |
 | `errorCount` | The amount of errors ESLint reported on |
 | `warningCount` | The amount of warnings ESLint reported on |
+| `markdown` | The complete markdown report of ESLint results |
 
 ## Usage Example
 

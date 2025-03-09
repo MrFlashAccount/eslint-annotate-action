@@ -29,6 +29,15 @@ inputs:
     description: "Whether to show a markdown report in the step summary."
     default: 'false'
     required: false
+outputs:
+  summary:
+    description: "A short description of the error and warning count"
+  errorCount:
+    description: "The amount of errors ESLint reported on"
+  warningCount:
+    description: "The amount of warnings ESLint reported on"
+  markdown:
+    description: "The complete markdown report of ESLint results"
 runs:
   using: "node20"
   main: "dist/index.js"

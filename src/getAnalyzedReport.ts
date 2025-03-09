@@ -20,6 +20,9 @@ export default function getAnalyzedReport(files: ESLintReport): AnalyzedESLintRe
 
   // Create an array for annotations
   const annotations: ChecksUpdateParamsOutputAnnotations[] = []
+  
+  // Track unique error/warning messages to prevent duplicates in markdown report
+  const seenMessages = new Set<string>()
 
   // Loop through each file
   for (const file of files) {
@@ -94,6 +97,17 @@ export default function getAnalyzedReport(files: ESLintReport): AnalyzedESLintRe
        * text for the error/warning
        */
       const link = `https://github.com/${OWNER}/${REPO}/blob/${SHA}/${filePathTrimmed}#L${line}:L${endLine}`
+      
+      // Create a unique identifier for this error/warning message
+      const messageId = `${filePathTrimmed}:${line}:${endLine}:${ruleId}:${message}`
+      
+      // Skip if we've already seen this exact message
+      if (seenMessages.has(messageId)) {
+        continue
+      }
+      
+      // Mark this message as seen
+      seenMessages.add(messageId)
 
       let messageText = `### [\`${filePathTrimmed}\` line \`${line.toString()}\`](${link})\n`
       messageText += '- Start Line: `' + line.toString() + '`\n'

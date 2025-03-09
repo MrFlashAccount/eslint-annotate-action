@@ -1,3 +1,7 @@
+# `3.1.0`
+
+- Add `markdown` output variable containing the complete markdown report of ESLint results
+
 # `3.0.0` - CONTAINS BREAKING CHANGES
 
 - Rename the `repo-token` input to `GITHUB_TOKEN`

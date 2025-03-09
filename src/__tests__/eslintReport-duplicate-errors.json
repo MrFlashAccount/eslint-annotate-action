@@ -1,0 +1,61 @@
+[{
+  "suppressedMessages": [],
+  "fatalErrorCount": 0,
+  "filePath": "src/example.ts",
+  "messages": [
+    {
+      "ruleId": "prettier/prettier",
+      "severity": 2,
+      "message": "Delete `;`",
+      "line": 20,
+      "column": 6,
+      "endLine": 20,
+      "endColumn": 7,
+      "fix": {
+        "range": [
+          609,
+          610
+        ],
+        "text": ""
+      }
+    },
+    {
+      "ruleId": "prettier/prettier",
+      "severity": 2,
+      "message": "Delete `;`",
+      "line": 20,
+      "column": 6,
+      "endLine": 20,
+      "endColumn": 7,
+      "fix": {
+        "range": [
+          609,
+          610
+        ],
+        "text": ""
+      }
+    },
+    {
+      "ruleId": "prettier/prettier",
+      "severity": 2,
+      "message": "Delete `;`",
+      "line": 20,
+      "column": 6,
+      "endLine": 20,
+      "endColumn": 7,
+      "fix": {
+        "range": [
+          609,
+          610
+        ],
+        "text": ""
+      }
+    }
+  ],
+  "errorCount": 3,
+  "warningCount": 0,
+  "fixableErrorCount": 3,
+  "fixableWarningCount": 0,
+  "source": "const test = 'testing';\nconsole.log(test);",
+  "usedDeprecatedRules": []
+}]
