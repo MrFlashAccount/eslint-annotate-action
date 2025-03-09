@@ -56,7 +56,8 @@ export default async function eslintJsonReportToJs(reportFilesGlob: string): Pro
   const uniqueFiles = [...new Set(files)]
 
   // Log number of files found
-  core.debug(`Found ${files.length} ESLint report files to process`)
+  core.debug(`Found ${files.length} ESLint report files to process \n\n ${files.join('\n')}`)
+  core.debug(`Unique files: ${uniqueFiles.join('\n')}`)
 
   if (uniqueFiles.length === 0) {
     core.warning(`No ESLint report files found matching pattern: ${reportFilesGlob}`)
