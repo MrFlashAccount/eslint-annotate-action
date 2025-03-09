@@ -56307,21 +56307,22 @@ async function eslintJsonReportToJs(reportFilesGlob) {
     const globber = await glob.create(reportFilesGlob, { matchDirectories: false });
     // Get all matching files
     const files = await globber.glob();
+    const uniqueFiles = [...new Set(files)];
     // Log number of files found
     core.debug(`Found ${files.length} ESLint report files to process`);
-    if (files.length === 0) {
+    if (uniqueFiles.length === 0) {
         core.warning(`No ESLint report files found matching pattern: ${reportFilesGlob}`);
         return [];
     }
     // Process all files and flatten the results
     // Use Promise.all to process files in parallel if there are multiple
-    if (files.length === 1) {
+    if (uniqueFiles.length === 1) {
         // Optimize for common case of single file
         return parseReportFile(files[0]);
     }
     else {
         // Process multiple files in parallel
-        return (await Promise.all(files.map(parseReportFile))).flat();
+        return (await Promise.all(uniqueFiles.map(parseReportFile))).flat();
     }
 }
 exports["default"] = eslintJsonReportToJs;
