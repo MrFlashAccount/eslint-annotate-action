@@ -1,4 +1,4 @@
-name: "ESLint Annotate from Report JSON"
+name: "ESLint PR Annotator: JSON Report to GitHub Comments"
 description: "Annotates pull request diffs with warnings and errors from an ESLint report JSON file."
 inputs:
   GITHUB_TOKEN:
