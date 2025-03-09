@@ -7,64 +7,63 @@ const {core, GITHUB_WORKSPACE, OWNER, REPO, SHA, failOnWarning, unusedDirectiveM
  * @param files a JavaScript representation of an ESLint JSON report
  */
 export default function getAnalyzedReport(files: ESLintReport): AnalyzedESLintReport {
-  // Create markdown placeholder
-  let markdownText = ''
+  // Create arrays for error and warning messages to build markdown more efficiently
+  const errorMessages: string[] = []
+  const warningMessages: string[] = []
 
   // Start the error and warning counts at 0
   let errorCount = 0
   let warningCount = 0
 
-  // Create text string placeholders
-  let errorText = ''
-  let warningText = ''
-
   // Create an array for annotations
   const annotations: ChecksUpdateParamsOutputAnnotations[] = []
-  
+
   // Track unique error/warning messages to prevent duplicates in markdown report
   const seenMessages = new Set<string>()
+
+  // Cache the GitHub workspace path replacement to avoid repeated string operations
+  const githubWorkspacePath = `${GITHUB_WORKSPACE}/`
+  const githubWorkspacePathLength = githubWorkspacePath.length
+
+  // Prepare the repository URL prefix once
+  const repoUrlPrefix = `https://github.com/${OWNER}/${REPO}/blob/${SHA}/`
 
   // Loop through each file
   for (const file of files) {
     // Get the file path and any warning/error messages
-    const {filePath, messages} = file
-
-    core.info(`Analyzing ${filePath}`)
+    const {filePath, messages, errorCount: fileErrorCount, warningCount: fileWarningCount} = file
 
     // Skip files with no error or warning messages
     if (!messages.length) {
       continue
     }
 
-    /**
-     * Increment the error and warning counts by
-     * the number of errors/warnings for this file
-     * and note files in the PR
-     */
-    errorCount += file.errorCount
-    warningCount += file.warningCount
+    core.info(`Analyzing ${filePath}`)
+
+    // Increment the error and warning counts
+    errorCount += fileErrorCount
+    warningCount += fileWarningCount
+
+    // Trim the absolute path prefix from the file path - do this once per file
+    const filePathTrimmed = filePath.startsWith(githubWorkspacePath)
+      ? filePath.substring(githubWorkspacePathLength)
+      : filePath
 
     // Loop through all the error/warning messages for the file
     for (const lintMessage of messages) {
       // Pull out information about the error/warning message
       const {column, severity, ruleId, message} = lintMessage
-      // Default line to 1 if it's not present
-      let {line} = lintMessage
-      if (!line) {
-        line = 1
-      }
 
-      // If there's no rule ID (e.g. an ignored file warning), skip
+      // Skip messages without a rule ID unless they're unused directive messages
       if (!ruleId && !message.startsWith(unusedDirectiveMessagePrefix)) continue
 
-      const endLine = lintMessage.endLine ? lintMessage.endLine : line
-      const endColumn = lintMessage.endColumn ? lintMessage.endColumn : column
+      // Default line to 1 if it's not present
+      const line = lintMessage.line || 1
+      const endLine = lintMessage.endLine || line
+      const endColumn = lintMessage.endColumn || column
 
       // Check if it a warning or error
       const isWarning = severity < 2
-
-      // Trim the absolute path prefix from the file path
-      const filePathTrimmed: string = filePath.replace(`${GITHUB_WORKSPACE}/`, '')
 
       /**
        * Create a GitHub annotation object for the error/warning
@@ -92,54 +91,52 @@ export default function getAnalyzedReport(files: ESLintReport): AnalyzedESLintRe
       // Add the annotation object to the array
       annotations.push(annotation)
 
-      /**
-       * Develop user-friendly markdown message
-       * text for the error/warning
-       */
-      const link = `https://github.com/${OWNER}/${REPO}/blob/${SHA}/${filePathTrimmed}#L${line}:L${endLine}`
-      
       // Create a unique identifier for this error/warning message
       const messageId = `${filePathTrimmed}:${line}:${endLine}:${ruleId}:${message}`
-      
+
       // Skip if we've already seen this exact message
       if (seenMessages.has(messageId)) {
         continue
       }
-      
+
       // Mark this message as seen
       seenMessages.add(messageId)
 
-      let messageText = `### [\`${filePathTrimmed}\` line \`${line.toString()}\`](${link})\n`
-      messageText += '- Start Line: `' + line.toString() + '`\n'
-      messageText += '- End Line: `' + endLine.toString() + '`\n'
-      messageText += '- Message: ' + message + '\n'
-      messageText += '  - From: [`' + ruleId + '`]\n'
+      // Create the link to the specific line in GitHub
+      const link = `${repoUrlPrefix}${filePathTrimmed}#L${line}:L${endLine}`
 
-      // Add the markdown text to the appropriate placeholder
+      // Create the message text more efficiently using template literals
+      const messageText = `### [\`${filePathTrimmed}\` line \`${line}\`](${link})
+- Start Line: \`${line}\`
+- End Line: \`${endLine}\`
+- Message: ${message}
+  - From: [\`${ruleId}\`]
+`
+
+      // Add the markdown text to the appropriate array
       if (isWarning) {
-        warningText += messageText
+        warningMessages.push(messageText)
       } else {
-        errorText += messageText
+        errorMessages.push(messageText)
       }
     }
   }
 
+  // Build markdown text more efficiently
+  let markdownText = ''
+
   // If there is any markdown error text, add it to the markdown output
-  if (errorText.length) {
-    markdownText += '## ' + errorCount.toString() + ' Error(s):\n'
-    markdownText += errorText + '\n'
+  if (errorMessages.length) {
+    markdownText += `## ${errorCount} Error(s):\n${errorMessages.join('')}\n`
   }
 
   // If there is any markdown warning text, add it to the markdown output
-  if (warningText.length) {
-    markdownText += '## ' + warningCount.toString() + ' Warning(s):\n'
-    markdownText += warningText + '\n'
+  if (warningMessages.length) {
+    markdownText += `## ${warningCount} Warning(s):\n${warningMessages.join('')}\n`
   }
 
-  let success = errorCount === 0
-  if (failOnWarning && warningCount > 0) {
-    success = false
-  }
+  // Determine success based on error count and warning count (if failOnWarning is true)
+  const success = errorCount === 0 && !(failOnWarning && warningCount > 0)
 
   // Return the ESLint report analysis
   return {

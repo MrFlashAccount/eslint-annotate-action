@@ -56263,29 +56263,66 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 const glob = __importStar(__nccwpck_require__(8090));
 const fs_1 = __importDefault(__nccwpck_require__(7147));
 const path_1 = __importDefault(__nccwpck_require__(1017));
+const core = __importStar(__nccwpck_require__(2186));
+/**
+ * Parses a single ESLint report file and returns its contents as a JavaScript object
+ * @param reportFile Path to an ESLint JSON report file
+ * @returns Parsed ESLint report
+ */
 function parseReportFile(reportFile) {
-    const reportPath = path_1.default.resolve(reportFile);
-    if (!fs_1.default.existsSync(reportPath)) {
-        throw new Error(`The report-json file "${reportFile}" could not be resolved.`);
-    }
-    const reportContents = fs_1.default.readFileSync(reportPath, 'utf-8');
-    let reportParsed;
     try {
-        reportParsed = JSON.parse(reportContents);
+        const reportPath = path_1.default.resolve(reportFile);
+        // Check if file exists before trying to read it
+        if (!fs_1.default.existsSync(reportPath)) {
+            throw new Error(`The report-json file "${reportFile}" could not be resolved.`);
+        }
+        // Read and parse the file in one operation
+        const reportParsed = JSON.parse(fs_1.default.readFileSync(reportPath, 'utf-8'));
+        // Log success for debugging
+        core.debug(`Successfully parsed report file: ${reportFile}`);
+        return reportParsed;
     }
     catch (error) {
-        throw new Error(`Error parsing the report-json file "${reportFile}".`);
+        // Provide more specific error messages based on error type
+        if (error instanceof SyntaxError) {
+            throw new Error(`Invalid JSON in report file "${reportFile}": ${error.message}`);
+        }
+        else if (error instanceof Error) {
+            throw new Error(`Error processing "${reportFile}": ${error.message}`);
+        }
+        else {
+            throw new Error(`Error parsing the report-json file "${reportFile}".`);
+        }
     }
-    return reportParsed;
 }
 /**
- * Converts an ESLint report JSON file to an array of JavaScript objects
- * @param reportFile path to an ESLint JSON file
+ * Converts ESLint report JSON files to an array of JavaScript objects
+ * @param reportFilesGlob Glob pattern for ESLint JSON files
+ * @returns Promise resolving to an array of ESLint report objects
  */
-async function eslintJsonReportToJs(reportFile) {
-    const globber = await glob.create(reportFile);
+async function eslintJsonReportToJs(reportFilesGlob) {
+    // Log the start of processing
+    core.debug(`Processing ESLint report files matching pattern: ${reportFilesGlob}`);
+    // Create globber with concurrency to improve performance on large numbers of files
+    const globber = await glob.create(reportFilesGlob, { matchDirectories: false });
+    // Get all matching files
     const files = await globber.glob();
-    return files.map(parseReportFile).flat();
+    // Log number of files found
+    core.debug(`Found ${files.length} ESLint report files to process`);
+    if (files.length === 0) {
+        core.warning(`No ESLint report files found matching pattern: ${reportFilesGlob}`);
+        return [];
+    }
+    // Process all files and flatten the results
+    // Use Promise.all to process files in parallel if there are multiple
+    if (files.length === 1) {
+        // Optimize for common case of single file
+        return parseReportFile(files[0]);
+    }
+    else {
+        // Process multiple files in parallel
+        return (await Promise.all(files.map(parseReportFile))).flat();
+    }
 }
 exports["default"] = eslintJsonReportToJs;
 
@@ -56308,52 +56345,50 @@ const { core, GITHUB_WORKSPACE, OWNER, REPO, SHA, failOnWarning, unusedDirective
  * @param files a JavaScript representation of an ESLint JSON report
  */
 function getAnalyzedReport(files) {
-    // Create markdown placeholder
-    let markdownText = '';
+    // Create arrays for error and warning messages to build markdown more efficiently
+    const errorMessages = [];
+    const warningMessages = [];
     // Start the error and warning counts at 0
     let errorCount = 0;
     let warningCount = 0;
-    // Create text string placeholders
-    let errorText = '';
-    let warningText = '';
     // Create an array for annotations
     const annotations = [];
     // Track unique error/warning messages to prevent duplicates in markdown report
     const seenMessages = new Set();
+    // Cache the GitHub workspace path replacement to avoid repeated string operations
+    const githubWorkspacePath = `${GITHUB_WORKSPACE}/`;
+    const githubWorkspacePathLength = githubWorkspacePath.length;
+    // Prepare the repository URL prefix once
+    const repoUrlPrefix = `https://github.com/${OWNER}/${REPO}/blob/${SHA}/`;
     // Loop through each file
     for (const file of files) {
         // Get the file path and any warning/error messages
-        const { filePath, messages } = file;
-        core.info(`Analyzing ${filePath}`);
+        const { filePath, messages, errorCount: fileErrorCount, warningCount: fileWarningCount } = file;
         // Skip files with no error or warning messages
         if (!messages.length) {
             continue;
         }
-        /**
-         * Increment the error and warning counts by
-         * the number of errors/warnings for this file
-         * and note files in the PR
-         */
-        errorCount += file.errorCount;
-        warningCount += file.warningCount;
+        core.info(`Analyzing ${filePath}`);
+        // Increment the error and warning counts
+        errorCount += fileErrorCount;
+        warningCount += fileWarningCount;
+        // Trim the absolute path prefix from the file path - do this once per file
+        const filePathTrimmed = filePath.startsWith(githubWorkspacePath)
+            ? filePath.substring(githubWorkspacePathLength)
+            : filePath;
         // Loop through all the error/warning messages for the file
         for (const lintMessage of messages) {
             // Pull out information about the error/warning message
             const { column, severity, ruleId, message } = lintMessage;
-            // Default line to 1 if it's not present
-            let { line } = lintMessage;
-            if (!line) {
-                line = 1;
-            }
-            // If there's no rule ID (e.g. an ignored file warning), skip
+            // Skip messages without a rule ID unless they're unused directive messages
             if (!ruleId && !message.startsWith(unusedDirectiveMessagePrefix))
                 continue;
-            const endLine = lintMessage.endLine ? lintMessage.endLine : line;
-            const endColumn = lintMessage.endColumn ? lintMessage.endColumn : column;
+            // Default line to 1 if it's not present
+            const line = lintMessage.line || 1;
+            const endLine = lintMessage.endLine || line;
+            const endColumn = lintMessage.endColumn || column;
             // Check if it a warning or error
             const isWarning = severity < 2;
-            // Trim the absolute path prefix from the file path
-            const filePathTrimmed = filePath.replace(`${GITHUB_WORKSPACE}/`, '');
             /**
              * Create a GitHub annotation object for the error/warning
              * See https://developer.github.com/v3/checks/runs/#annotations-object
@@ -56377,11 +56412,6 @@ function getAnalyzedReport(files) {
             }
             // Add the annotation object to the array
             annotations.push(annotation);
-            /**
-             * Develop user-friendly markdown message
-             * text for the error/warning
-             */
-            const link = `https://github.com/${OWNER}/${REPO}/blob/${SHA}/${filePathTrimmed}#L${line}:L${endLine}`;
             // Create a unique identifier for this error/warning message
             const messageId = `${filePathTrimmed}:${line}:${endLine}:${ruleId}:${message}`;
             // Skip if we've already seen this exact message
@@ -56390,34 +56420,36 @@ function getAnalyzedReport(files) {
             }
             // Mark this message as seen
             seenMessages.add(messageId);
-            let messageText = `### [\`${filePathTrimmed}\` line \`${line.toString()}\`](${link})\n`;
-            messageText += '- Start Line: `' + line.toString() + '`\n';
-            messageText += '- End Line: `' + endLine.toString() + '`\n';
-            messageText += '- Message: ' + message + '\n';
-            messageText += '  - From: [`' + ruleId + '`]\n';
-            // Add the markdown text to the appropriate placeholder
+            // Create the link to the specific line in GitHub
+            const link = `${repoUrlPrefix}${filePathTrimmed}#L${line}:L${endLine}`;
+            // Create the message text more efficiently using template literals
+            const messageText = `### [\`${filePathTrimmed}\` line \`${line}\`](${link})
+- Start Line: \`${line}\`
+- End Line: \`${endLine}\`
+- Message: ${message}
+  - From: [\`${ruleId}\`]
+`;
+            // Add the markdown text to the appropriate array
             if (isWarning) {
-                warningText += messageText;
+                warningMessages.push(messageText);
             }
             else {
-                errorText += messageText;
+                errorMessages.push(messageText);
             }
         }
     }
+    // Build markdown text more efficiently
+    let markdownText = '';
     // If there is any markdown error text, add it to the markdown output
-    if (errorText.length) {
-        markdownText += '## ' + errorCount.toString() + ' Error(s):\n';
-        markdownText += errorText + '\n';
+    if (errorMessages.length) {
+        markdownText += `## ${errorCount} Error(s):\n${errorMessages.join('')}\n`;
     }
     // If there is any markdown warning text, add it to the markdown output
-    if (warningText.length) {
-        markdownText += '## ' + warningCount.toString() + ' Warning(s):\n';
-        markdownText += warningText + '\n';
+    if (warningMessages.length) {
+        markdownText += `## ${warningCount} Warning(s):\n${warningMessages.join('')}\n`;
     }
-    let success = errorCount === 0;
-    if (failOnWarning && warningCount > 0) {
-        success = false;
-    }
+    // Determine success based on error count and warning count (if failOnWarning is true)
+    const success = errorCount === 0 && !(failOnWarning && warningCount > 0);
     // Return the ESLint report analysis
     return {
         errorCount,
@@ -56451,31 +56483,51 @@ const { GITHUB_WORKSPACE, OWNER, REPO, pullRequest, onlyChangedFiles } = constan
  * @param reportJS a JavaScript representation of an ESLint JSON report
  */
 async function getPullRequestChangedAnalyzedReport(reportJS) {
+    // Get all files changed in the pull request
     const changedFiles = await (0, getPullRequestFiles_1.default)({
         owner: OWNER,
         repo: REPO,
         pull_number: pullRequest.number,
     });
-    // Separate lint reports for PR and non-PR files
-    const pullRequestFilesReportJS = reportJS.filter((file) => {
-        file.filePath = file.filePath.replace(GITHUB_WORKSPACE + '/', '');
-        return changedFiles.indexOf(file.filePath) !== -1;
+    // Create a Set for faster lookup of changed files
+    const changedFilesSet = new Set(changedFiles);
+    // Cache the workspace path for efficient replacement
+    const workspacePath = `${GITHUB_WORKSPACE}/`;
+    const workspacePathLength = workspacePath.length;
+    // Normalize all file paths in the report once
+    const normalizedReport = reportJS.map((file) => {
+        // Create a shallow copy to avoid mutating the original
+        const normalizedFile = { ...file };
+        // Strip the workspace prefix if it exists
+        if (normalizedFile.filePath.startsWith(workspacePath)) {
+            normalizedFile.filePath = normalizedFile.filePath.substring(workspacePathLength);
+        }
+        return normalizedFile;
     });
+    // Efficiently filter for PR files using the Set
+    const pullRequestFilesReportJS = normalizedReport.filter((file) => changedFilesSet.has(file.filePath));
+    // Analyze the PR files
     const analyzedPullRequestReport = (0, getAnalyzedReport_1.default)(pullRequestFilesReportJS);
+    // Build the summary and markdown for PR files
     let summary = `${analyzedPullRequestReport.summary} in pull request changed files.`;
     let markdown = `# Pull Request Changed Files ESLint Results:\n**${analyzedPullRequestReport.summary}**\n${analyzedPullRequestReport.markdown}`;
+    // Only process non-PR files if we're not limiting to changed files
     if (!onlyChangedFiles) {
-        const nonPullRequestFilesReportJS = reportJS.filter((file) => {
-            file.filePath = file.filePath.replace(GITHUB_WORKSPACE + '/', '');
-            return changedFiles.indexOf(file.filePath) === -1;
-        });
+        // Efficiently filter for non-PR files using the Set
+        const nonPullRequestFilesReportJS = normalizedReport.filter((file) => !changedFilesSet.has(file.filePath));
+        // Analyze the non-PR files
         const analyzedNonPullRequestReport = (0, getAnalyzedReport_1.default)(nonPullRequestFilesReportJS);
+        // Add to the summary and markdown
         summary += `${analyzedNonPullRequestReport.summary} in files outside of the pull request.`;
         markdown += `\n\n# Non-Pull Request Changed Files ESLint Results:\n**${analyzedNonPullRequestReport.summary}**\n${analyzedNonPullRequestReport.markdown}`;
     }
-    if (markdown.length > 65535) {
-        markdown = markdown.slice(0, 65250) + '\n\n...summary too long, truncated.';
+    // Truncate markdown if it's too long (GitHub has a 65535 character limit)
+    const MAX_MARKDOWN_LENGTH = 65535;
+    const TRUNCATION_BUFFER = 285; // Buffer for the truncation message
+    if (markdown.length > MAX_MARKDOWN_LENGTH) {
+        markdown = markdown.slice(0, MAX_MARKDOWN_LENGTH - TRUNCATION_BUFFER) + '\n\n...summary too long, truncated.';
     }
+    // Return the report with the correct annotations
     return {
         errorCount: analyzedPullRequestReport.errorCount,
         warningCount: analyzedPullRequestReport.warningCount,
@@ -56564,37 +56616,74 @@ const getPullRequestChangedAnalyzedReport_1 = __importDefault(__nccwpck_require_
 const addSummary_1 = __importDefault(__nccwpck_require__(5577));
 const constants_1 = __importDefault(__nccwpck_require__(9042));
 const { reportFile, onlyChangedFiles, failOnError, failOnWarning, markdownReportOnStepSummary } = constants_1.default;
+/**
+ * Main function that runs the ESLint report analysis
+ */
 async function run() {
-    core.info(`Starting analysis of the ESLint report ${reportFile.replace(/\n/g, ', ')}. Standby...`);
-    const reportJS = await (0, eslintJsonReportToJs_1.default)(reportFile);
-    const analyzedReport = onlyChangedFiles
-        ? await (0, getPullRequestChangedAnalyzedReport_1.default)(reportJS)
-        : (0, getAnalyzedReport_1.default)(reportJS);
-    const annotations = analyzedReport.annotations;
-    const conclusion = analyzedReport.success ? 'success' : 'failure';
-    core.info(analyzedReport.summary);
-    core.setOutput('summary', analyzedReport.summary);
-    core.setOutput('errorCount', analyzedReport.errorCount);
-    core.setOutput('warningCount', analyzedReport.warningCount);
-    core.setOutput('markdown', analyzedReport.markdown);
+    let checkId;
     try {
+        core.info(`Starting analysis of the ESLint report ${reportFile.replace(/\n/g, ', ')}. Standby...`);
+        // Parse the ESLint report file(s)
+        const startTime = Date.now();
+        const reportJS = await (0, eslintJsonReportToJs_1.default)(reportFile);
+        core.debug(`ESLint report parsed in ${Date.now() - startTime}ms`);
+        // If no report data found, exit early
+        if (!reportJS || !reportJS.length) {
+            core.warning('No ESLint report data found. Skipping analysis.');
+            return;
+        }
+        // Analyze the report - either all files or just changed files
+        const analysisStartTime = Date.now();
+        const analyzedReport = onlyChangedFiles
+            ? await (0, getPullRequestChangedAnalyzedReport_1.default)(reportJS)
+            : (0, getAnalyzedReport_1.default)(reportJS);
+        core.debug(`Report analysis completed in ${Date.now() - analysisStartTime}ms`);
+        const annotations = analyzedReport.annotations;
+        const conclusion = analyzedReport.success ? 'success' : 'failure';
+        // Log summary and set outputs
+        core.info(analyzedReport.summary);
+        core.setOutput('summary', analyzedReport.summary);
+        core.setOutput('errorCount', analyzedReport.errorCount);
+        core.setOutput('warningCount', analyzedReport.warningCount);
+        core.setOutput('markdown', analyzedReport.markdown);
         // Create a new, in-progress status check
-        const checkId = await (0, openStatusCheck_1.default)();
+        const checkStartTime = Date.now();
+        checkId = await (0, openStatusCheck_1.default)();
+        core.debug(`Status check created in ${Date.now() - checkStartTime}ms`);
         // Add all the annotations to the status check
-        await (0, addAnnotationsToStatusCheck_1.default)(annotations, checkId);
-        // Add report to job summary
+        if (annotations.length > 0) {
+            const annotationStartTime = Date.now();
+            await (0, addAnnotationsToStatusCheck_1.default)(annotations, checkId);
+            core.debug(`Annotations added in ${Date.now() - annotationStartTime}ms`);
+        }
+        else {
+            core.info('No annotations to add to the status check');
+        }
+        // Add report to job summary if requested
         if (markdownReportOnStepSummary) {
             await (0, addSummary_1.default)(analyzedReport.markdown);
         }
-        // Finally, close the GitHub check as completed
+        // Close the GitHub check as completed
         await (0, closeStatusCheck_1.default)(conclusion, checkId, analyzedReport.summary, markdownReportOnStepSummary ? analyzedReport.markdown : '');
-        // Fail the Action if the report analysis conclusions is failure
+        core.debug(`Status check completed in ${Date.now() - checkStartTime}ms`);
+        // Fail the Action if the report analysis conclusion is failure
         if ((failOnWarning || failOnError) && conclusion === 'failure') {
             core.setFailed(`${analyzedReport.errorCount} errors and ${analyzedReport.warningCount} warnings`);
-            process.exit(1);
+            return;
         }
+        // If we got this far things were a success
+        core.info(`ESLint report analysis complete in ${Date.now() - startTime}ms. No errors found!`);
     }
     catch (err) {
+        // Try to close the check if it was opened and there was an error
+        if (checkId) {
+            try {
+                await (0, closeStatusCheck_1.default)('failure', checkId, 'Error analyzing ESLint report', '');
+            }
+            catch (closeErr) {
+                core.warning('Failed to close the status check after an error occurred');
+            }
+        }
         const errorMessage = 'Error creating a status check for the ESLint analysis.';
         // err only has an error message if it is an instance of Error
         if (err instanceof Error) {
@@ -56604,11 +56693,13 @@ async function run() {
             core.setFailed(errorMessage);
         }
     }
-    // If we got this far things were a success
-    core.info('ESLint report analysis complete. No errors found!');
-    process.exit(0);
 }
-run();
+// Execute the main function
+run().catch((error) => {
+    console.error('Unhandled error:', error);
+    core.setFailed(`Unhandled error: ${error.message || 'Unknown error'}`);
+    process.exit(1);
+});
 
 
 /***/ }),

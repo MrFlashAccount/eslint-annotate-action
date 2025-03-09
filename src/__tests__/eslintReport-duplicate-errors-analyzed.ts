@@ -1,4 +1,4 @@
-import type { AnalyzedESLintReport } from '../types';
+import type {AnalyzedESLintReport} from '../types'
 
 // Expected analyzed report - only one unique error expected in the markdown
 const analyzedReport: AnalyzedESLintReport = {
@@ -43,6 +43,6 @@ const analyzedReport: AnalyzedESLintReport = {
       message: '[prettier/prettier] Delete `;`',
     },
   ],
-};
+}
 
-export default analyzedReport;
+export default analyzedReport
